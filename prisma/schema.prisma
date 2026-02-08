@@ -1,0 +1,41 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountType {
+  CHECKING
+  CREDIT_CARD
+  SAVINGS
+  CASH
+}
+
+model Account {
+  id           String        @id @default(cuid())
+  name         String
+  type         AccountType
+  currency     String        @default("EUR")
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+}
+
+model Transaction {
+  id           String   @id @default(cuid())
+  accountId    String
+  bookingDate  DateTime
+  amount       Decimal
+  counterparty String
+  purpose      String
+  fingerprint  String
+  source       String   @default("import")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, fingerprint])
+}
