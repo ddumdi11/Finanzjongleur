@@ -80,3 +80,6 @@ git ls-remote --heads origin
 
 ## Nächster Schritt
 - Prisma Client anbinden und Import-/Konfliktentscheidungen persistent speichern.
+
+
+Lokaler Testcommit
