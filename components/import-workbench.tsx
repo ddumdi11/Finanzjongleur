@@ -1,29 +1,65 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useMemo, useState } from "react";
-import { parseSimpleTransactions, ParsedTransaction } from "@/lib/parse";
+import { ChangeEvent, DragEvent, useEffect, useState, useTransition } from "react";
+import { detectVolksbankStatementYear, parseSimpleTransactions, parseVolksbankPaste, ParsedTransaction } from "@/lib/parse";
 
-type ConflictDecision = "overwrite" | "discard" | "keep_both";
+const VOLKSBANK_START_LINE = /^\d{2}\.\d{2}(?:\.\d{4})?\.?\s+\d{2}\.\d{2}(?:\.\d{4})?\.?/;
 
-function buildFingerprint(tx: ParsedTransaction): string {
-  return [tx.date, tx.amount.toFixed(2), tx.counterparty.toLowerCase(), tx.purpose.toLowerCase()].join("|");
+type AccountOption = {
+  id: string;
+  name: string;
+  type: string;
+  currency: string;
+};
+
+type ImportWorkbenchProps = {
+  accounts: AccountOption[];
+  createImportedTransactionsAction: (
+    accountId: string,
+    parsedTransactions: ParsedTransaction[]
+  ) => Promise<{ importedCount: number }>;
+};
+
+function looksLikeVolksbankPaste(input: string): boolean {
+  const matches = input
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => VOLKSBANK_START_LINE.test(line)).length;
+
+  return matches >= 3;
 }
 
-const existingSample = new Set(["2025-02-01|-59.99|streamflix|abo februar"]);
-
-export default function ImportWorkbench() {
+export default function ImportWorkbench({ accounts, createImportedTransactionsAction }: ImportWorkbenchProps) {
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
-  const [decisions, setDecisions] = useState<Record<string, ConflictDecision>>({});
+  const [yearOverride, setYearOverride] = useState("");
+  const [parsed, setParsed] = useState<ParsedTransaction[]>([]);
+  const [mode, setMode] = useState<"volksbank" | "csv">("csv");
+  const [volksbankYear, setVolksbankYear] = useState<number | null>(null);
+  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isImporting, startImportTransition] = useTransition();
 
-  const parsed = useMemo(() => parseSimpleTransactions(text), [text]);
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      const useVolksbankParser = looksLikeVolksbankPaste(text);
+      setMode(useVolksbankParser ? "volksbank" : "csv");
 
-  const withConflicts = parsed.map((tx) => {
-    const fingerprint = buildFingerprint(tx);
-    return { ...tx, fingerprint, conflict: existingSample.has(fingerprint) };
-  });
+      if (useVolksbankParser) {
+        const overrideYearNumber = Number(yearOverride);
+        const hasValidOverride = Number.isInteger(overrideYearNumber) && overrideYearNumber >= 1900 && overrideYearNumber <= 2099;
+        const year = hasValidOverride ? overrideYearNumber : detectVolksbankStatementYear(text);
+        setVolksbankYear(year);
+        setParsed(parseVolksbankPaste(text, year));
+      } else {
+        setVolksbankYear(null);
+        setParsed(parseSimpleTransactions(text));
+      }
+    }, 300);
 
-  const conflicts = withConflicts.filter((t) => t.conflict);
+    return () => clearTimeout(handle);
+  }, [text, yearOverride]);
 
   const onFile = async (file: File) => {
     const content = await file.text();
@@ -42,11 +78,37 @@ export default function ImportWorkbench() {
     if (file) await onFile(file);
   };
 
+  const canImport = parsed.length > 0 && selectedAccountId.length > 0 && !isImporting;
+
+  const onImport = () => {
+    if (!canImport) return;
+
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    startImportTransition(async () => {
+      try {
+        const result = await createImportedTransactionsAction(selectedAccountId, parsed);
+        setSuccessMessage(`${result.importedCount} Buchungen importiert`);
+        setText("");
+        setFileName(null);
+        setParsed([]);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Import fehlgeschlagen.";
+        setErrorMessage(message);
+      }
+    });
+  };
+
   return (
     <div className="card">
       <h2>Import-Workbench</h2>
-      <p>TXT per Drag-and-Drop oder Copy/Paste einfügen. Format pro Zeile:</p>
-      <code>YYYY-MM-DD;Betrag;Gegenkonto;Verwendungszweck</code>
+      <p>TXT per Drag-and-Drop oder Copy/Paste einfügen.</p>
+      <p>
+        Auto-Erkennung: Volksbank-Paste (mind. 3 Startzeilen) oder CSV-Fallback
+        <br />
+        <code>YYYY-MM-DD;Betrag;Gegenkonto;Verwendungszweck</code>
+      </p>
 
       <div
         className="dropzone"
@@ -61,49 +123,65 @@ export default function ImportWorkbench() {
         {fileName ? <p>Geladen: {fileName}</p> : null}
       </div>
 
+      <label htmlFor="yearOverride">Jahr (optional)</label>
+      <input
+        id="yearOverride"
+        type="number"
+        min={1900}
+        max={2099}
+        step={1}
+        value={yearOverride}
+        onChange={(e) => setYearOverride(e.target.value)}
+        placeholder="z. B. 2025"
+        style={{ display: "block", width: "10rem", marginTop: "0.25rem", marginBottom: "0.75rem" }}
+      />
+
       <textarea
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder="2025-02-01;-59.99;Streamflix;Abo Februar"
+        placeholder="Volksbank-Paste oder CSV einfügen"
       />
 
       <section className="card" style={{ marginTop: "1rem" }}>
-        <h3>Parser-Ergebnis ({withConflicts.length})</h3>
-        {withConflicts.length === 0 ? <p>Noch keine validen Zeilen erkannt.</p> : null}
+        <h3>Erkannte Buchungen ({parsed.length})</h3>
+        <p>
+          Parser:{" "}
+          {mode === "volksbank" ? `Volksbank-Paste (Jahr ${volksbankYear ?? new Date().getFullYear()})` : "CSV-Fallback"}
+        </p>
+        {parsed.length === 0 ? <p>Noch keine validen Buchungen erkannt.</p> : null}
         <ul>
-          {withConflicts.map((item, index) => (
-            <li key={`${item.fingerprint}-${index}`}>
-              {item.date} | {item.amount.toFixed(2)} € | {item.counterparty} | {item.purpose}
-              {item.conflict ? " ⚠️ mögliches Duplikat" : ""}
+          {parsed.map((item, index) => (
+            <li key={`${item.bookingDateISO}-${item.amount}-${index}`}>
+              {item.bookingDateISO} | {item.amount.toFixed(2)} € | {item.description}
             </li>
           ))}
         </ul>
       </section>
 
-      {conflicts.length > 0 ? (
-        <section className="dialog">
-          <h3>Konflikte gefunden ({conflicts.length})</h3>
-          {conflicts.map((item, index) => {
-            const rowKey = `${item.fingerprint}-${index}`;
+      <section className="card" style={{ marginTop: "1rem" }}>
+        <h3>Import</h3>
+        <label htmlFor="accountId">Konto auswählen</label>
+        <select
+          id="accountId"
+          value={selectedAccountId}
+          onChange={(e) => setSelectedAccountId(e.target.value)}
+          style={{ display: "block", marginTop: "0.25rem", marginBottom: "0.75rem" }}
+        >
+          <option value="">Bitte Konto wählen</option>
+          {accounts.map((account) => (
+            <option key={account.id} value={account.id}>
+              {account.name} ({account.type}, {account.currency})
+            </option>
+          ))}
+        </select>
 
-            return (
-              <div key={rowKey} style={{ marginBottom: "0.75rem" }}>
-                <p>
-                  Datensatz bereits vorhanden: <strong>{item.date}</strong>, {item.amount.toFixed(2)} €, {item.counterparty}
-                </p>
-                <div className="inline-actions">
-                  <button onClick={() => setDecisions((prev) => ({ ...prev, [rowKey]: "overwrite" }))}>Überschreiben</button>
-                  <button className="secondary" onClick={() => setDecisions((prev) => ({ ...prev, [rowKey]: "discard" }))}>
-                    Verwerfen
-                  </button>
-                  <button onClick={() => setDecisions((prev) => ({ ...prev, [rowKey]: "keep_both" }))}>Beide behalten</button>
-                </div>
-                {decisions[rowKey] ? <small>Entscheidung: {decisions[rowKey]}</small> : null}
-              </div>
-            );
-          })}
-        </section>
-      ) : null}
+        <button type="button" onClick={onImport} disabled={!canImport}>
+          {isImporting ? "Importiere..." : "Buchungen importieren"}
+        </button>
+
+        {successMessage ? <p>{successMessage}</p> : null}
+        {errorMessage ? <p>{errorMessage}</p> : null}
+      </section>
     </div>
   );
 }

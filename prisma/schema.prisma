@@ -27,7 +27,10 @@ model Transaction {
   id           String   @id @default(cuid())
   accountId    String
   bookingDate  DateTime
+  valueDate    DateTime
   amount       Decimal
+  description  String
+  memoRaw      String
   counterparty String
   purpose      String
   fingerprint  String
