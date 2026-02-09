@@ -1,9 +1,13 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useEffect, useState, useTransition } from "react";
-import { detectVolksbankStatementYear, parseSimpleTransactions, parseVolksbankPaste, ParsedTransaction } from "@/lib/parse";
-
-const VOLKSBANK_START_LINE = /^\d{2}\.\d{2}(?:\.\d{4})?\.?\s+\d{2}\.\d{2}(?:\.\d{4})?\.?/;
+import {
+  detectVolksbankStatementYear,
+  parseSimpleTransactions,
+  parseVolksbankPaste,
+  ParsedTransaction,
+  VOLKSBANK_START_LINE,
+} from "@/lib/parse";
 
 type AccountOption = {
   id: string;
@@ -17,7 +21,7 @@ type ImportWorkbenchProps = {
   createImportedTransactionsAction: (
     accountId: string,
     parsedTransactions: ParsedTransaction[]
-  ) => Promise<{ importedCount: number }>;
+  ) => Promise<{ importedCount: number; error?: string }>;
 };
 
 function looksLikeVolksbankPaste(input: string): boolean {
@@ -89,6 +93,11 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
     startImportTransition(async () => {
       try {
         const result = await createImportedTransactionsAction(selectedAccountId, parsed);
+        if (result.error) {
+          setErrorMessage(result.error);
+          return;
+        }
+
         setSuccessMessage(`${result.importedCount} Buchungen importiert`);
         setText("");
         setFileName(null);

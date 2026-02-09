@@ -10,10 +10,6 @@ export default async function HomePage() {
   });
 
   const dateFormatter = new Intl.DateTimeFormat("de-DE");
-  const amountFormatter = new Intl.NumberFormat("de-DE", {
-    style: "currency",
-    currency: "EUR",
-  });
 
   return (
     <section className="grid">
@@ -25,6 +21,10 @@ export default async function HomePage() {
           <ul>
             {accounts.map((account) => {
               const accountTransactions = transactions.filter((transaction) => transaction.accountId === account.id).slice(0, 10);
+              const amountFormatter = new Intl.NumberFormat("de-DE", {
+                style: "currency",
+                currency: account.currency,
+              });
 
               return (
                 <li key={account.id}>

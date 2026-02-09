@@ -17,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/">Dashboard</Link>
             <Link href="/accounts">Konten</Link>
             <Link href="/import">Import</Link>
+            <Link href="/transactions">Buchungen</Link>
           </nav>
         </header>
         <main className="container">{children}</main>
