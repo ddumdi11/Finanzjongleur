@@ -110,6 +110,10 @@ button.secondary {
   align-items: center;
 }
 
+.transactions-learning .transaction-row {
+  grid-template-columns: 7rem 1fr auto auto;
+}
+
 .transaction-amount {
   text-align: right;
   font-variant-numeric: tabular-nums;

@@ -6,7 +6,7 @@ export type ParsedTransaction = {
   memoRaw: string;
 };
 
-const VOLKSBANK_START_LINE = /^\d{2}\.\d{2}(?:\.\d{4})?\.?\s+\d{2}\.\d{2}(?:\.\d{4})?\.?/;
+export const VOLKSBANK_START_LINE = /^\d{2}\.\d{2}(?:\.\d{4})?\.?\s+\d{2}\.\d{2}(?:\.\d{4})?\.?/;
 
 function normalizeGermanAmount(amountRaw: string): number {
   const sanitized = amountRaw.replace(/\s+/g, "");
