@@ -53,11 +53,11 @@ Es dient als **Referenz für Implementierung, Tests und Codex-Prompts**.
 ### Stabile Felder (für Dedup geeignet)
 
 - accountId
-- Wertstellungsdatum
-- Betrag
-- Gläubiger-ID (`CRED`) **oder**
-- normalisierter Merchant-Name
-- Mandatsreferenz (`MREF`) (falls vorhanden)
+- bookingDateISO
+- valueDateISO
+- amount (fixed auf 2 Nachkommastellen)
+- description (trimmed + lowercased)
+- memoRaw (trimmed + lowercased)
 
 ---
 
@@ -66,7 +66,6 @@ Es dient als **Referenz für Implementierung, Tests und Codex-Prompts**.
 - Laufende Referenznummern
 - Terminal-IDs
 - Uhrzeiten
-- EREF (nur ergänzend nutzen)
 - Layout- oder Zeilenumbrüche
 
 ---
@@ -75,11 +74,16 @@ Es dient als **Referenz für Implementierung, Tests und Codex-Prompts**.
 
 hash(
 accountId +
-wertstellungsdatum +
-betrag +
-(CRED || normalizedMerchantName) +
-(MREF || "")
+bookingDateISO +
+valueDateISO +
+amount.toFixed(2) +
+description.trim().toLowerCase() +
+memoRaw.trim().toLowerCase()
 )
+
+Die Teile werden mit `|` verbunden und anschließend gehasht.
+
+Hinweis Migrationen / Dedup: Die Migration legt einen UNIQUE Index auf `(accountId, fingerprint)` an und kann fehlschlagen, wenn die DB bereits Dubletten enthält (z. B. durch Re-Import vor Dedup). In diesem Fall DB bereinigen/resetten oder deduplizieren, dann Migration erneut ausführen.
 
 ---
 
@@ -101,7 +105,7 @@ Eine einzelne Kategorie (z. B. `INSURANCE`) ist fachlich zu grob.
 
 ---
 
-### Lösung: Zwei Ebenen
+### Lösung (fachlich, Zielbild): Zwei Ebenen
 
 #### Category (Budget-Ebene)
 
@@ -125,6 +129,8 @@ Eine einzelne Kategorie (z. B. `INSURANCE`) ist fachlich zu grob.
 
 👉 Kategorie = „Wofür?“  
 👉 Subkategorie = „Welche Art genau?“
+
+Aktueller Stand im Schema: Es gibt derzeit nur `Transaction.category`. Subcategory/Tag ist geplant, aber noch nicht umgesetzt.
 
 ---
 

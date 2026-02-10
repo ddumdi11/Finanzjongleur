@@ -34,32 +34,57 @@ async function saveCategory(formData: FormData) {
   });
 
   if (transaction.merchantKey && transaction.merchantKey.trim().length > 0) {
-    const existingRule = await prisma.merchantRule.findFirst({
-      where: { pattern: transaction.merchantKey },
-      orderBy: { confidence: "desc" },
-    });
-
     const merchantName = (transaction.merchantName?.trim() || transaction.description.trim() || "Unbekannt").slice(0, 120);
+    await prisma.$transaction(async (tx) => {
+      const existingRule = await tx.merchantRule.findFirst({
+        where: { pattern: transaction.merchantKey! },
+        orderBy: { confidence: "desc" },
+      });
 
-    if (existingRule) {
-      await prisma.merchantRule.update({
-        where: { id: existingRule.id },
-        data: {
-          category,
-          merchantName,
-          confidence: Math.min(100, existingRule.confidence + 10),
-        },
-      });
-    } else {
-      await prisma.merchantRule.create({
-        data: {
-          pattern: transaction.merchantKey,
-          merchantName,
-          category,
-          confidence: 60,
-        },
-      });
-    }
+      if (existingRule) {
+        await tx.merchantRule.update({
+          where: { id: existingRule.id },
+          data: {
+            category,
+            merchantName,
+            confidence: Math.min(100, existingRule.confidence + 10),
+          },
+        });
+        return;
+      }
+
+      try {
+        await tx.merchantRule.create({
+          data: {
+            pattern: transaction.merchantKey!,
+            merchantName,
+            category,
+            confidence: 60,
+          },
+        });
+      } catch (error) {
+        const prismaCode = typeof error === "object" && error !== null && "code" in error ? (error as { code?: string }).code : undefined;
+        if (prismaCode !== "P2002") {
+          throw error;
+        }
+
+        // Falls parallel bereits angelegt wurde: bestehende Regel hochziehen.
+        const concurrentRule = await tx.merchantRule.findFirst({
+          where: { pattern: transaction.merchantKey! },
+          orderBy: { confidence: "desc" },
+        });
+        if (concurrentRule) {
+          await tx.merchantRule.update({
+            where: { id: concurrentRule.id },
+            data: {
+              category,
+              merchantName,
+              confidence: Math.min(100, concurrentRule.confidence + 10),
+            },
+          });
+        }
+      }
+    });
   }
 
   revalidatePath("/transactions");
@@ -74,7 +99,7 @@ export default async function TransactionsPage() {
   });
 
   return (
-    <section className="card">
+    <section className="card transactions-learning">
       <h2>Letzte Buchungen</h2>
       {transactions.length === 0 ? (
         <p>Noch keine Buchungen vorhanden.</p>
