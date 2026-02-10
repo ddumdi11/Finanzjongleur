@@ -182,7 +182,7 @@ Eine Regel speichert:
 - Import (neu) → Buchungen entstehen
 - Import (gleich) → 0 neue Buchungen
 - Import mit Jahr-Override → neue Buchungen
-- Kleine Textänderung → neue Buchung
+- Kleine Textänderung (z. B. zusätzliche Leerzeichen/Zeilenumbrüche/Bank-Variante) → kein neues Duplikat
 - Regel vorhanden → Kategorie automatisch gesetzt
 - Keine Regel → Kategorie bleibt leer
 
