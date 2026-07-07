@@ -278,3 +278,21 @@ anwenden"-Klick kuenftig automatisch zugeordnet.
 ## Bekannte Eigenart (verbleibt)
 
 Der Volksbank-Parser setzt `description` auf die Buchungsart ("Basislastschrift", "Kartenzahlung girocard", "Überweisungsauftrag"), nicht auf den echten Haendler. Der Haendler steht in der ersten Memo-Zeile. Die Auto-Erkennung nutzt daher die ersten zwei Memo-Zeilen als Gruppierungs-Schluessel — die Schema-Semantik bleibt stabil. Fuer Phase 6+ waere ein optionales Wiring der Merchant-Normalisierung in den Import-Pfad (und Bulk-Apply bestehender MerchantRule) ein sinnvoller naechster Schritt, um die manuelle Kategorisierung zu skalieren.
+
+## Backlog
+
+### Berichtsexport / Weitergabe der Auswertung
+
+Die neue Berichte-Seite `/berichte` soll später exportierbar werden, damit Monatsauswertungen außerhalb der App weiterverwendet werden können.
+
+Priorität der Exportformate:
+
+1. **HTML-Export** – bevorzugt, weil Layout, Tabellen und menschenlesbare Struktur erhalten bleiben.
+2. **Markdown-Export** – nützlich für Z-System / Notizen / Übergaben.
+3. **CSV-Export** – nützlich für Tabellenkalkulation und Weiterverarbeitung.
+4. **PDF** – optional; möglichst zunächst über druckfreundliches HTML / Browser-Druck statt eigener PDF-Library.
+
+Möglicher technischer Ansatz:
+- Route Handler z. B. `/berichte/export?month=YYYY-MM&account=...&format=html|md|csv`
+- PDF zunächst über Print-CSS / Browser „Drucken als PDF“
+- keine neue Dependency, solange HTML/Markdown/CSV ausreichen
