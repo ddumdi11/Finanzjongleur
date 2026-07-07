@@ -10,3 +10,19 @@ pnpm-debug.log*
 coverage
 *.db
 *.db-journal
+
+# Python virtual environment (fuer scripts/)
+.venv/
+__pycache__/
+
+# Persoenliche Daten fuer das Redaction-Skript (NIEMALS ins Repo)
+scripts/redact_config.json
+
+# Local/private import data
+scripts/output/
+*Kontoauszug*.pdf
+private-data/
+kontoauszuege/
+
+# TypeScript build info
+*.tsbuildinfo
