@@ -27,6 +27,12 @@ export interface DetectionInput {
   description: string;
   memoRaw: string;
   accountId: string;
+  /**
+   * Bereits beim Import gespeicherter Merchant-Key (z. B. bunqs sauberes
+   * Name-Feld). Wenn gesetzt und nicht leer, hat er Vorrang vor der
+   * Ableitung aus memoRaw.
+   */
+  merchantKey?: string | null;
 }
 
 export interface DetectionCandidate {
@@ -248,8 +254,10 @@ export function detectRecurringCandidates(
   };
   const groups = new Map<string, Group>();
   for (const input of inputs) {
-    const key = deriveMerchantKey(input.memoRaw);
-    if (!key) continue; // leere Memos ignorieren
+    // Gespeicherter merchantKey hat Vorrang; nur bei null/leer wird aus
+    // memoRaw abgeleitet.
+    const key = input.merchantKey?.trim() || deriveMerchantKey(input.memoRaw);
+    if (!key) continue; // weder merchantKey noch verwertbares Memo
     const groupKey = `${input.accountId}|${key}`;
     const existing = groups.get(groupKey);
     if (existing) {

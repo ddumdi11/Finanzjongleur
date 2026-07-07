@@ -234,6 +234,7 @@ export async function runDetectionAction(_formData: FormData) {
       amount: true,
       description: true,
       memoRaw: true,
+      merchantKey: true,
     },
   });
 
@@ -243,6 +244,7 @@ export async function runDetectionAction(_formData: FormData) {
     amount: Number(t.amount),
     description: t.description,
     memoRaw: t.memoRaw,
+    merchantKey: t.merchantKey,
   }));
 
   const candidates = detectRecurringCandidates(inputs);

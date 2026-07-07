@@ -13,7 +13,12 @@ function d(iso: string): Date {
 function monthly(
   startIso: string,
   months: number,
-  opts: { amount: number; memo: string; accountId?: string },
+  opts: {
+    amount: number;
+    memo: string;
+    accountId?: string;
+    merchantKey?: string | null;
+  },
 ): DetectionInput[] {
   const out: DetectionInput[] = [];
   const [y, m, day] = startIso.split("-").map(Number);
@@ -25,6 +30,7 @@ function monthly(
       description: "Basislastschrift",
       memoRaw: opts.memo,
       accountId: opts.accountId ?? "acc1",
+      merchantKey: opts.merchantKey,
     });
   }
   return out;
@@ -338,5 +344,54 @@ describe("detectRecurringCandidates", () => {
     expect(candidates[0].periodicity).toBe("MONTHLY");
     expect(candidates[0].amountTolerance).toBeGreaterThan(0);
     expect(candidates[0].confidence).toBeGreaterThanOrEqual(80);
+  });
+
+  it("bevorzugt einen gespeicherten merchantKey vor der memoRaw-Ableitung", () => {
+    // Identisches Boilerplate-Memo, aber der Import hat saubere
+    // merchantKeys gespeichert — die Gruppen muessen getrennt bleiben.
+    const netflix = monthly("2025-01-05", 12, {
+      amount: -12.99,
+      memo: "SEPA-Lastschrift\nSammelauftrag",
+      merchantKey: "netflix",
+    });
+    const spotify = monthly("2025-01-20", 12, {
+      amount: -9.99,
+      memo: "SEPA-Lastschrift\nSammelauftrag",
+      merchantKey: "spotify",
+    });
+    const candidates = detectRecurringCandidates([...netflix, ...spotify]);
+    expect(candidates).toHaveLength(2);
+    const keys = candidates.map((c) => c.merchantKey).sort();
+    expect(keys).toEqual(["netflix", "spotify"]);
+  });
+
+  it("erkennt Buchungen mit leerem Memo, wenn ein merchantKey gespeichert ist", () => {
+    const txns = monthly("2025-01-19", 12, {
+      amount: -9.99,
+      memo: "",
+      merchantKey: "bunq bv",
+    });
+    const candidates = detectRecurringCandidates(txns);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].merchantKey).toBe("bunq bv");
+  });
+
+  it("faellt auf die memoRaw-Ableitung zurueck, wenn merchantKey null oder leer ist", () => {
+    const withNull = monthly("2025-01-01", 12, {
+      amount: -567,
+      memo: "a.h.f. Immobilien-Verwaltungs-GmbH\nMANDATSREF. 2300/01104",
+      merchantKey: null,
+    });
+    const withBlank = monthly("2025-01-01", 12, {
+      amount: -42,
+      memo: "E.ON Energie Deutschland GmbH\nAbschlag Strom",
+      merchantKey: "   ",
+      accountId: "acc2",
+    });
+    const candidates = detectRecurringCandidates([...withNull, ...withBlank]);
+    expect(candidates).toHaveLength(2);
+    const keys = candidates.map((c) => c.merchantKey);
+    expect(keys.some((k) => k.includes("immobilien"))).toBe(true);
+    expect(keys.some((k) => k.includes("eon") || k.includes("energie"))).toBe(true);
   });
 });
