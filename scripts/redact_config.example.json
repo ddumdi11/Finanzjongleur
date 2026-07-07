@@ -1,0 +1,16 @@
+{
+  "_hinweis": "Kopiere diese Datei nach 'redact_config.json' und passe die Werte an. redact_config.json ist gitignored, damit echte Daten nicht im Repo landen.",
+  "name": "Max Mustermann",
+  "address_lines": [
+    "Musterstrasse 1",
+    "12345 Musterstadt"
+  ],
+  "account_number": "1234567890",
+  "customer_number": "K00000000",
+  "bank_code": "12345678",
+  "bic": "GENODED1XXX",
+  "extras": [
+    "Weitere Begriffe, die entfernt werden sollen",
+    "Zum Beispiel Namen Dritter aus Ueberweisungen"
+  ]
+}

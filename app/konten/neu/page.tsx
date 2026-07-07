@@ -2,6 +2,7 @@ import { AccountType } from "@prisma/client";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { accountTypeLabels } from "@/lib/account-labels";
 
 async function createAccount(formData: FormData) {
   "use server";
@@ -53,7 +54,7 @@ export default function NewAccountPage() {
           <select id="type" name="type" defaultValue={AccountType.CHECKING} required>
             {Object.values(AccountType).map((value) => (
               <option key={value} value={value}>
-                {value}
+                {accountTypeLabels[value]}
               </option>
             ))}
           </select>

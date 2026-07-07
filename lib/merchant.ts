@@ -36,3 +36,24 @@ export function normalizeMerchant(input: string): string {
 
   return cleanedTokens.join(" ").replace(/\s+/g, " ").trim();
 }
+
+/**
+ * Leitet den `merchantKey` einer Transaktion aus dem Memo-Feld ab.
+ *
+ * Verwendet die erste nicht-leere Memo-Zeile — bei Volksbank-Buchungen ist
+ * das der Haendlername ("REWE Markt GmbH", "ERGO Krankenversiche", "PayPal
+ * Europe S.a.r.l. et Cie S.C.A" etc.). Kettengeschaefte mit wechselnden
+ * Filialen werden dadurch unter einem Key zusammengefasst (wollen wir, denn
+ * die Kategorie-Entscheidung des Nutzers soll chain-weit wirken).
+ *
+ * Gibt `null` zurueck, wenn das Memo leer ist.
+ */
+export function deriveTransactionMerchantKey(memoRaw: string): string | null {
+  const firstLine = memoRaw
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find(Boolean);
+  if (!firstLine) return null;
+  const key = normalizeMerchant(firstLine);
+  return key ? key : null;
+}
