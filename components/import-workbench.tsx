@@ -8,6 +8,8 @@ import {
   ParsedTransaction,
   VOLKSBANK_START_LINE,
 } from "@/lib/parse";
+import { looksLikeBunqCsv, parseBunqCsv } from "@/lib/parse-bunq";
+import { looksLikePaypalCsv, parsePaypalCsv } from "@/lib/parse-paypal";
 
 type AccountOption = {
   id: string;
@@ -21,7 +23,15 @@ type ImportWorkbenchProps = {
   createImportedTransactionsAction: (
     accountId: string,
     parsedTransactions: ParsedTransaction[]
-  ) => Promise<{ importedCount: number; error?: string }>;
+  ) => Promise<{
+    importedCount: number;
+    skippedCount?: number;
+    totalCount?: number;
+    error?: string;
+  }>;
+  extractPdfTextAction: (
+    formData: FormData
+  ) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
 };
 
 function looksLikeVolksbankPaste(input: string): boolean {
@@ -33,12 +43,16 @@ function looksLikeVolksbankPaste(input: string): boolean {
   return matches >= 3;
 }
 
-export default function ImportWorkbench({ accounts, createImportedTransactionsAction }: ImportWorkbenchProps) {
+export default function ImportWorkbench({
+  accounts,
+  createImportedTransactionsAction,
+  extractPdfTextAction,
+}: ImportWorkbenchProps) {
   const [text, setText] = useState("");
   const [fileName, setFileName] = useState<string | null>(null);
   const [yearOverride, setYearOverride] = useState("");
   const [parsed, setParsed] = useState<ParsedTransaction[]>([]);
-  const [mode, setMode] = useState<"volksbank" | "csv">("csv");
+  const [mode, setMode] = useState<"volksbank" | "bunq" | "paypal" | "csv">("csv");
   const [volksbankYear, setVolksbankYear] = useState<number | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -47,6 +61,20 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
 
   useEffect(() => {
     const handle = setTimeout(() => {
+      if (looksLikeBunqCsv(text)) {
+        setMode("bunq");
+        setVolksbankYear(null);
+        setParsed(parseBunqCsv(text));
+        return;
+      }
+
+      if (looksLikePaypalCsv(text)) {
+        setMode("paypal");
+        setVolksbankYear(null);
+        setParsed(parsePaypalCsv(text));
+        return;
+      }
+
       const useVolksbankParser = looksLikeVolksbankPaste(text);
       setMode(useVolksbankParser ? "volksbank" : "csv");
 
@@ -66,6 +94,25 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
   }, [text, yearOverride]);
 
   const onFile = async (file: File) => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const isPdf =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+
+    if (isPdf) {
+      const formData = new FormData();
+      formData.append("file", file);
+      const result = await extractPdfTextAction(formData);
+      if (!result.ok) {
+        setErrorMessage(result.error);
+        return;
+      }
+      setFileName(file.name);
+      setText(result.text);
+      return;
+    }
+
     const content = await file.text();
     setFileName(file.name);
     setText(content);
@@ -98,7 +145,12 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
           return;
         }
 
-        setSuccessMessage(`${result.importedCount} Buchungen importiert`);
+        const skipped = result.skippedCount ?? 0;
+        const summary =
+          skipped > 0
+            ? `${result.importedCount} Buchungen importiert, ${skipped} Duplikate übersprungen`
+            : `${result.importedCount} Buchungen importiert`;
+        setSuccessMessage(summary);
         setText("");
         setFileName(null);
         setParsed([]);
@@ -112,9 +164,17 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
   return (
     <div className="card">
       <h2>Import-Workbench</h2>
-      <p>TXT per Drag-and-Drop oder Copy/Paste einfügen.</p>
       <p>
-        Auto-Erkennung: Volksbank-Paste (mind. 3 Startzeilen) oder CSV-Fallback
+        PDF, TXT oder CSV per Drag-and-Drop ablegen — alternativ einfach
+        hineinkopieren.
+      </p>
+      <p>
+        Auto-Erkennung: Volksbank-Auszug (PDF oder Paste mit mind. 3
+        Startzeilen), bunq-CSV-Export (Semikolon-getrennt, mit Header
+        <code>Date;Interest Date;Amount;Counterparty;Name;Description</code>),
+        PayPal-CSV-Export (Komma-getrennt, deutscher Header mit
+        <code>Datum,Beschreibung,Brutto,Name,Transaktionscode,…</code>)
+        oder CSV-Fallback
         <br />
         <code>YYYY-MM-DD;Betrag;Gegenkonto;Verwendungszweck</code>
       </p>
@@ -128,7 +188,7 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
         <label htmlFor="fileInput">
           Datei hier hineinziehen oder <strong>Datei wählen</strong>.
         </label>
-        <input id="fileInput" type="file" accept=".txt,.csv" onChange={onSelectFile} />
+        <input id="fileInput" type="file" accept=".pdf,.txt,.csv" onChange={onSelectFile} />
         {fileName ? <p>Geladen: {fileName}</p> : null}
       </div>
 
@@ -155,7 +215,13 @@ export default function ImportWorkbench({ accounts, createImportedTransactionsAc
         <h3>Erkannte Buchungen ({parsed.length})</h3>
         <p>
           Parser:{" "}
-          {mode === "volksbank" ? `Volksbank-Paste (Jahr ${volksbankYear ?? new Date().getFullYear()})` : "CSV-Fallback"}
+          {mode === "volksbank"
+            ? `Volksbank-Paste (Jahr ${volksbankYear ?? new Date().getFullYear()})`
+            : mode === "bunq"
+              ? "bunq-CSV"
+              : mode === "paypal"
+                ? "PayPal-CSV"
+                : "CSV-Fallback"}
         </p>
         {parsed.length === 0 ? <p>Noch keine validen Buchungen erkannt.</p> : null}
         <ul>
