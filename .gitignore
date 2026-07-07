@@ -26,3 +26,8 @@ kontoauszuege/
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Von Next.js generierte Typ-Datei — wird bei jedem dev/build neu erzeugt
+# und enthaelt nichts Handgepflegtes. Nicht versionieren (verursacht sonst
+# staendige CRLF/LF-Diffs unter Windows).
+next-env.d.ts
