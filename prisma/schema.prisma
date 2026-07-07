@@ -16,22 +16,52 @@ enum AccountType {
 
 enum TransactionCategory {
   GROCERIES
+  DISCRETIONARY
+  DINING
+  SUBSCRIPTIONS
+  COMMUNICATIONS
+  TRANSPORT
   RENT
-  INSURANCE
   UTILITIES
+  INSURANCE
+  HEALTH
+  FEES
+  GIFT
   INCOME
   CASH
   TRANSFER
   OTHER
 }
 
+enum RecurrenceKind {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+  CUSTOM
+}
+
+enum RecurringSource {
+  MANUAL
+  AUTO_DETECTED
+}
+
+/// Optionaler Grund fuer die Beendigung einer wiederkehrenden Zahlung.
+/// Frei waehlbar im "Beenden"-Formular; null = nicht angegeben.
+enum RecurringEndReason {
+  TOO_EXPENSIVE
+  NOT_NEEDED
+  PROVIDER_SWITCH
+  OTHER
+}
+
 model Account {
-  id           String        @id @default(cuid())
-  name         String
-  type         AccountType
-  currency     String        @default("EUR")
-  createdAt    DateTime      @default(now())
-  transactions Transaction[]
+  id                String             @id @default(cuid())
+  name              String
+  type              AccountType
+  currency          String             @default("EUR")
+  createdAt         DateTime           @default(now())
+  transactions      Transaction[]
+  recurringPayments RecurringPayment[]
 }
 
 model Transaction {
@@ -67,4 +97,59 @@ model MerchantRule {
   updatedAt    DateTime            @updatedAt
 
   @@index([pattern])
+}
+
+/// Geplante oder erkannte wiederkehrende Zahlung (Miete, Versicherung, Abo usw.).
+/// Grundlage fuer die Forecast-Ansicht. Siehe docs/adr/0003-forecast-und-wiederkehrende-zahlungen.md
+model RecurringPayment {
+  id               String               @id @default(cuid())
+  accountId        String
+  label            String               // z. B. "Miete", "Strom E.ON", "Netflix"
+
+  // Betrag: expectedAmount = typischer Betrag; Toleranz fuer Schwankungen
+  expectedAmount   Decimal
+  amountTolerance  Decimal              @default(0)
+  currency         String               @default("EUR")
+
+  // Periodizitaet: intervalDays nur bei CUSTOM, dayOfMonth optional (Default = anchorDate.day)
+  periodicity      RecurrenceKind
+  intervalDays     Int?
+  dayOfMonth       Int?
+  anchorDate       DateTime
+
+  // Matching gegen eingehende Buchungen
+  merchantKey      String?
+  category         TransactionCategory?
+
+  // Status und Lebenszyklus
+  isActive         Boolean              @default(true)
+  nextExpectedDate DateTime?
+  source           RecurringSource      @default(MANUAL)
+  confidence       Int?                 // nur bei AUTO_DETECTED (0..100)
+  confirmedAt      DateTime?            // null = unbestaetigter Vorschlag
+  sourceNote       String?              // kurze Quellen-Info fuer Auto-Vorschlaege
+
+  // Vertrags-Lebenszyklus (alles optional ausser endedAt, wenn ueber
+  // "Beenden"-Form gesetzt). startedAt erlaubt z. B. "Hatte ich 2 Jahre"-
+  // Rueckblick; endNote/endReason erfassen den Kuendigungs-Kontext.
+  startedAt        DateTime?
+  endedAt          DateTime?
+  endNote          String?
+  endReason        RecurringEndReason?
+
+  // Verworfener Vorschlag: dismissedAt!=null markiert eine vom Nutzer
+  // abgelehnte AUTO_DETECTED-Gruppe. Die Auto-Erkennung schlaegt diese
+  // merchantKey-Gruppe dann nicht erneut vor — auch wenn weitere
+  // Buchungen importiert werden.
+  dismissedAt      DateTime?
+
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  account          Account              @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, isActive])
+  @@index([nextExpectedDate])
+  @@index([endedAt])
+  @@index([dismissedAt])
 }
