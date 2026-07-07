@@ -4,6 +4,13 @@ export type ParsedTransaction = {
   description: string;
   amount: number;
   memoRaw: string;
+  /**
+   * Optional: praekomputierter merchantKey. Wird von Parsern gesetzt, die
+   * bereits ein sauberes Haendler-Feld in der Quelle haben (z. B. bunq
+   * mit der Name-Spalte). Wenn nicht gesetzt, leitet der Import-Pfad den
+   * Schluessel aus der ersten Memo-Zeile ab.
+   */
+  merchantKey?: string;
 };
 
 export const VOLKSBANK_START_LINE = /^\d{2}\.\d{2}(?:\.\d{4})?\.?\s+\d{2}\.\d{2}(?:\.\d{4})?\.?/;
@@ -151,23 +158,36 @@ export function parseVolksbankPaste(text: string, year?: number): ParsedTransact
       }
     | null = null;
 
+  const flushCurrent = () => {
+    if (!current) return;
+    transactions.push({
+      bookingDateISO: current.bookingDateISO,
+      valueDateISO: current.valueDateISO,
+      description: current.description,
+      amount: current.amount,
+      memoRaw: current.memoLines.join("\n"),
+    });
+    current = null;
+  };
+
   for (const line of lines) {
-    if (/^Übertrag\b/i.test(line)) {
+    // Seiten-Umbruch und Saldo-Marker: laufende Buchung abschliessen,
+    // damit Header/Footer der naechsten Seite nicht als Memo an die
+    // vorherige Buchung angehaengt werden.
+    const isPageBreak =
+      /^Übertrag\b/i.test(line) ||
+      /^alter Kontostand\b/i.test(line) ||
+      /^neuer Kontostand\b/i.test(line) ||
+      /^-- \d+ of \d+ --$/.test(line);
+    if (isPageBreak) {
+      flushCurrent();
       continue;
     }
 
     const match = line.match(startPattern);
 
     if (match) {
-      if (current) {
-        transactions.push({
-          bookingDateISO: current.bookingDateISO,
-          valueDateISO: current.valueDateISO,
-          description: current.description,
-          amount: current.amount,
-          memoRaw: current.memoLines.join("\n"),
-        });
-      }
+      flushCurrent();
 
       const [, bookingToken, valueToken, descriptionRaw, amountRaw, direction] = match;
       const bookingDateParts = parseDateToken(bookingToken);
@@ -178,8 +198,10 @@ export function parseVolksbankPaste(text: string, year?: number): ParsedTransact
         continue;
       }
 
-      const hasFullYearBoth = bookingDateParts.year !== undefined && valueDateParts.year !== undefined;
-      const lineYear = hasFullYearBoth ? bookingDateParts.year : statementYear;
+      const lineYear: number =
+        bookingDateParts.year !== undefined && valueDateParts.year !== undefined
+          ? bookingDateParts.year
+          : statementYear;
       const bookingDateISO = toISODate(bookingDateParts.day, bookingDateParts.month, lineYear);
       const valueDateISO = toISODate(valueDateParts.day, valueDateParts.month, lineYear);
 
@@ -211,15 +233,7 @@ export function parseVolksbankPaste(text: string, year?: number): ParsedTransact
     }
   }
 
-  if (current) {
-    transactions.push({
-      bookingDateISO: current.bookingDateISO,
-      valueDateISO: current.valueDateISO,
-      description: current.description,
-      amount: current.amount,
-      memoRaw: current.memoLines.join("\n"),
-    });
-  }
+  flushCurrent();
 
   return transactions;
 }
