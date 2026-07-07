@@ -296,3 +296,33 @@ Möglicher technischer Ansatz:
 - Route Handler z. B. `/berichte/export?month=YYYY-MM&account=...&format=html|md|csv`
 - PDF zunächst über Print-CSS / Browser „Drucken als PDF“
 - keine neue Dependency, solange HTML/Markdown/CSV ausreichen
+
+#### Abgesegneter Implementierungsplan (Phase B)
+
+Leitgedanke: die Berichtsberechnung aus `app/berichte/page.tsx` herausziehen,
+damit Seite und Export dieselbe Prisma-Aggregation nutzen und nicht
+auseinanderlaufen. Keine neue Dependency; PDF über Browser-Druck.
+
+1. **Datenaufbau extrahieren** (`lib/report-data.ts`): `buildMonthlyReport({ month, account })`
+   kapselt die `groupBy`/`_sum`/`_count`-Logik und liefert ein flaches,
+   serialisierbares Objekt (Monatslabel, Währung, `incomeRows`, `expenseRows`,
+   Saldo, Ein-/Ausgabensummen, `uncategorized {count,sum}`, Vergleichsblock
+   aktuell/Vormonat/Delta, Kontoname). Decimal→Number-Wandlung einmalig hier;
+   Summierung bleibt in der DB. Die Page wird darauf umgebaut (reines Refactoring).
+2. **Reine Renderer** (`lib/report-format.ts`): `renderReportHtml` (eigenständiges
+   HTML mit Inline-CSS, druckfreundlich für PDF), `renderReportMarkdown`
+   (Markdown-Tabellen), `renderReportCsv` (flache Zeilen `Abschnitt;Kategorie;Anzahl;Betrag`,
+   Beträge als rohe Zahlen, UTF-8-BOM für Excel).
+3. **Route Handler** (`app/berichte/export/route.ts`): `GET` liest `month`/`account`/`format`,
+   validiert `format ∈ {html,md,csv}`, ruft `buildMonthlyReport` + passenden Renderer,
+   liefert `Response` mit `Content-Type` und `Content-Disposition: attachment; filename="bericht-YYYY-MM.<ext>"`.
+4. **Verlinkung** auf `/berichte`: Zeile „Exportieren als HTML · Markdown · CSV“
+   mit aktuellem `month`+`account`, plus Hinweis „Für PDF: HTML öffnen und im Browser drucken“.
+5. **Tests** (`lib/report-format.test.ts`): die puren Renderer gegen ein
+   `MonthlyReport`-Fixture prüfen (HTML enthält Kategoriezeilen, MD-Tabellenstruktur,
+   CSV-Escaping/BOM) — ohne DB, passend zum Vitest-Setup.
+
+Offene Kleinentscheidung: CSV-Format — deutsches Excel (`;`-Trenner, Komma-Dezimal,
+BOM) vs. neutral (`,`-Trenner, Punkt-Dezimal). Empfehlung: deutsches Excel.
+
+Start beim nächsten Mal: Schritt 1 (Refactoring `buildMonthlyReport`).
