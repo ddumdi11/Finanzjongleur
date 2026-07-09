@@ -1,27 +1,43 @@
 /**
  * Parser fuer bunq-CSV-Exports.
  *
- * Format (Semikolon-separiert, alle Felder in Anfuehrungszeichen):
- *   "Date";"Interest Date";"Amount";"Counterparty";"Name";"Description"
- *   "2024-07-02";"2024-07-02";"0,05";"NL13BUNQ2094122549";"bunq";"bunq Payday 2024-07-02 EUR"
+ * Format (Semikolon-separiert, alle Felder in Anfuehrungszeichen). bunq
+ * exportiert je nach Version leicht unterschiedliche Spaltensaetze; wir
+ * unterstuetzen beide bekannten Varianten:
+ *
+ *   alt  (6 Spalten):
+ *     "Date";"Interest Date";"Amount";"Counterparty";"Name";"Description"
+ *     "2024-07-02";"2024-07-02";"0,05";"NL13BUNQ2094122549";"bunq";"bunq Payday 2024-07-02 EUR"
+ *
+ *   neu  (7 Spalten, zusaetzliche "Account"-Spalte des eigenen Kontos):
+ *     "Date";"Interest Date";"Amount";"Account";"Counterparty";"Name";"Description"
+ *     "2026-03-01";"2026-03-01";"108,00";"DE__";"DE__";"Thorsten Diederichs";"Anthropic"
+ *
+ * Da die Spalten ueber ihre Kopfzeilen-Namen (nicht ueber ihre Position)
+ * angesprochen werden, spielt die genaue Reihenfolge/zusaetzliche Spalten
+ * keine Rolle — es muessen nur alle Pflichtspalten vorhanden sein.
  *
  * Eigenheiten:
  *  - Date-Format ist ISO (YYYY-MM-DD), also kein Jahr-Raten noetig
- *  - Amount mit deutschem Komma-Dezimal ("0,05", "-22,13")
+ *  - Amount mit deutschem Komma-Dezimal ("0,05", "-22,13", "-107,10")
  *  - Counterparty ist die IBAN der Gegenseite, bei Kartenzahlungen leer
  *  - "Name" ist der Haendler-Name — den nehmen wir direkt als merchantKey
  *  - "Description" ist freier Verwendungszweck, bei Fremdwaehrungs-Buchungen
- *    inkl. Original-Betrag und Wechselkurs
+ *    inkl. Original-Betrag und Wechselkurs (kann Kommata enthalten — dank
+ *    Quoting wird die Zeile trotzdem korrekt gesplittet)
  */
 import type { ParsedTransaction } from "./parse";
 import { normalizeMerchant } from "./merchant";
 
-/** Erwartete Spalten der bunq-CSV in genau dieser Reihenfolge. */
-const EXPECTED_COLUMNS = [
+/**
+ * Pflichtspalten einer bunq-CSV. Diese muessen (unabhaengig von Position und
+ * zusaetzlichen Spalten wie "Account"/"Counterparty") in der Kopfzeile
+ * vorhanden sein, damit wir den Export als bunq erkennen und verarbeiten.
+ */
+const REQUIRED_COLUMNS = [
   "date",
   "interest date",
   "amount",
-  "counterparty",
   "name",
   "description",
 ] as const;
@@ -71,13 +87,17 @@ export function parseCsvRow(line: string, separator = ";"): string[] {
   return result;
 }
 
-/** Erkennt, ob ein Text wie ein bunq-CSV-Export aussieht. */
+/**
+ * Erkennt, ob ein Text wie ein bunq-CSV-Export aussieht. Geprueft wird die
+ * Kopfzeile ueber die Spaltennamen (nicht deren Position), damit sowohl das
+ * alte 6-Spalten- als auch das neue 7-Spalten-Format (mit "Account") erkannt
+ * werden. Es muessen alle Pflichtspalten vorhanden sein.
+ */
 export function looksLikeBunqCsv(text: string): boolean {
   const firstLine = text.split(/\r?\n/).find((l) => l.trim().length > 0);
   if (!firstLine) return false;
   const header = parseCsvRow(firstLine).map((h) => h.trim().toLowerCase());
-  if (header.length < EXPECTED_COLUMNS.length) return false;
-  return EXPECTED_COLUMNS.every((col, idx) => header[idx] === col);
+  return REQUIRED_COLUMNS.every((col) => header.includes(col));
 }
 
 function isIsoDate(value: string): boolean {
@@ -107,7 +127,7 @@ export function parseBunqCsv(text: string): ParsedTransaction[] {
   if (nonEmpty.length === 0) return [];
 
   const header = parseCsvRow(nonEmpty[0]).map((h) => h.trim().toLowerCase());
-  const idx = (col: (typeof EXPECTED_COLUMNS)[number]) => header.indexOf(col);
+  const idx = (col: (typeof REQUIRED_COLUMNS)[number]) => header.indexOf(col);
   const dateIdx = idx("date");
   const interestIdx = idx("interest date");
   const amountIdx = idx("amount");
