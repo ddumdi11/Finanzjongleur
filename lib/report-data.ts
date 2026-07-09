@@ -1,5 +1,5 @@
 import type { TransactionCategory } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma } from "./prisma";
 
 /**
  * Datenaufbau für die Berichte-Seite und (später) den Export.
@@ -69,6 +69,46 @@ export type ReportAccount = {
 };
 
 /**
+ * Eigenübertragungen (Kategorie TRANSFER) — interne Umbuchungen zwischen
+ * eigenen Konten. Diese werden aus den Hauptsummen herausgerechnet und hier
+ * separat ausgewiesen, damit sie die Auswertung nicht verzerren.
+ *  - `incomeSum`  = Summe der eingehenden Übertragungen (positiv)
+ *  - `expenseSum` = Summe der ausgehenden Übertragungen (negativ)
+ *  - `netSum`     = Netto (incomeSum + expenseSum)
+ *  - `count`      = Anzahl der Eigenübertragungs-Buchungen
+ */
+export type InternalTransfers = {
+  incomeSum: number;
+  expenseSum: number;
+  netSum: number;
+  count: number;
+};
+
+/** Kategorie-gruppierte Rohdaten aus Prisma `groupBy` (Ein- oder Ausgaben). */
+type AmountGroup = {
+  category: TransactionCategory | null;
+  _sum: { amount: unknown };
+  _count: { _all: number };
+};
+
+/**
+ * Bereinigtes Zwischenergebnis aus den gruppierten Monatsdaten: Hauptsummen
+ * und Kategorie-Zeilen ohne Eigenübertragungen plus der separate
+ * Eigenübertragungs-Block.
+ */
+export type MonthlyGroupSummary = {
+  incomeRows: CategoryRow[];
+  expenseRows: CategoryRow[];
+  /** Einnahmen ohne Eigenübertragungen. */
+  incomeTotal: number;
+  /** Ausgaben ohne Eigenübertragungen. */
+  expenseTotal: number;
+  internalTransfers: InternalTransfers;
+  /** Anzahl kategorisierter Buchungen ohne Eigenübertragungen. */
+  monthTxnCount: number;
+};
+
+/**
  * Flaches, serialisierbares Ergebnis einer Monatsauswertung. Enthält alle
  * Werte, die Seite und Export für die Darstellung brauchen — bereits als
  * einfache Zahlen/Strings, ohne Prisma-Decimals.
@@ -94,26 +134,28 @@ export type MonthlyReport = {
   mixedCurrencyWarning: boolean;
   incomeRows: CategoryRow[];
   expenseRows: CategoryRow[];
+  /** Einnahmen ohne Eigenübertragungen. */
   incomeTotal: number;
+  /** Ausgaben ohne Eigenübertragungen. */
   expenseTotal: number;
+  /** Saldo ohne Eigenübertragungen (incomeTotal + expenseTotal). */
   saldo: number;
   uncategorized: { count: number; sum: number };
+  /** Eigenübertragungen separat ausgewiesen (aus den Hauptsummen entfernt). */
+  internalTransfers: InternalTransfers;
   monthTxnCount: number;
   comparison: ComparisonRow[];
 };
+
+/** Kategorie der Eigenübertragungen (interne Umbuchungen). */
+const TRANSFER_CATEGORY: TransactionCategory = "TRANSFER";
 
 /**
  * Wandelt gruppierte Buchungen in Anzeige-Zeilen. Die `null`-Kategorie
  * (unkategorisiert) wird ausgelassen — sie bekommt einen eigenen Abschnitt.
  * Sortiert nach Betragshoehe absteigend.
  */
-function buildCategoryRows(
-  groups: {
-    category: TransactionCategory | null;
-    _sum: { amount: unknown };
-    _count: { _all: number };
-  }[],
-): CategoryRow[] {
+function buildCategoryRows(groups: AmountGroup[]): CategoryRow[] {
   return groups
     .filter((g): g is typeof g & { category: TransactionCategory } => g.category !== null)
     .map((g) => ({
@@ -122,6 +164,47 @@ function buildCategoryRows(
       count: g._count._all,
     }))
     .sort((a, b) => Math.abs(b.sum) - Math.abs(a.sum));
+}
+
+/**
+ * Reine (DB-freie) Verdichtung der gruppierten Monatsdaten. Rechnet die
+ * Eigenübertragungen (Kategorie TRANSFER) aus den Hauptsummen und den
+ * Kategorie-Zeilen heraus und weist sie separat aus. Dadurch bildet der Saldo
+ * nur die tatsächlichen Ein-/Ausgaben ab, nicht die internen Umbuchungen.
+ *
+ * Bewusst als reine Funktion ausgelagert, damit sich die Trennlogik ohne
+ * Datenbank testen lässt.
+ */
+export function summarizeMonthlyGroups(
+  incomeGroups: AmountGroup[],
+  expenseGroups: AmountGroup[],
+): MonthlyGroupSummary {
+  const isTransfer = (g: AmountGroup) => g.category === TRANSFER_CATEGORY;
+  const sumAmount = (groups: AmountGroup[]) =>
+    groups.reduce((s, g) => s + toNumber(g._sum.amount), 0);
+  const sumCount = (groups: AmountGroup[]) => groups.reduce((s, g) => s + g._count._all, 0);
+
+  const incomeNonTransfer = incomeGroups.filter((g) => !isTransfer(g));
+  const expenseNonTransfer = expenseGroups.filter((g) => !isTransfer(g));
+  const incomeTransfer = incomeGroups.filter(isTransfer);
+  const expenseTransfer = expenseGroups.filter(isTransfer);
+
+  const transferIncomeSum = sumAmount(incomeTransfer);
+  const transferExpenseSum = sumAmount(expenseTransfer);
+
+  return {
+    incomeRows: buildCategoryRows(incomeNonTransfer),
+    expenseRows: buildCategoryRows(expenseNonTransfer),
+    incomeTotal: sumAmount(incomeNonTransfer),
+    expenseTotal: sumAmount(expenseNonTransfer),
+    internalTransfers: {
+      incomeSum: transferIncomeSum,
+      expenseSum: transferExpenseSum,
+      netSum: transferIncomeSum + transferExpenseSum,
+      count: sumCount(incomeTransfer) + sumCount(expenseTransfer),
+    },
+    monthTxnCount: sumCount(incomeNonTransfer) + sumCount(expenseNonTransfer),
+  };
 }
 
 /**
@@ -158,8 +241,8 @@ export async function buildMonthlyReport({
     incomeGroups,
     expenseGroups,
     uncategorized,
-    prevIncomeAgg,
-    prevExpenseAgg,
+    prevIncomeGroups,
+    prevExpenseGroups,
   ] = await Promise.all([
     prisma.account.findMany({ orderBy: { createdAt: "asc" } }),
     // Einnahmen (amount > 0) je Kategorie, Summe + Anzahl aus der DB.
@@ -182,36 +265,37 @@ export async function buildMonthlyReport({
       _sum: { amount: true },
       _count: { _all: true },
     }),
-    // Vormonat: nur die Gesamtsummen fuer den Vergleich.
-    prisma.transaction.aggregate({
+    // Vormonat: je Kategorie gruppiert, damit die Eigenübertragungen fuer den
+    // Vergleich genauso herausgerechnet werden koennen wie im aktuellen Monat.
+    prisma.transaction.groupBy({
+      by: ["category"],
       where: { ...acctWhere, bookingDate: { gte: prevStart, lt: prevEnd }, amount: { gt: 0 } },
       _sum: { amount: true },
+      _count: { _all: true },
     }),
-    prisma.transaction.aggregate({
+    prisma.transaction.groupBy({
+      by: ["category"],
       where: { ...acctWhere, bookingDate: { gte: prevStart, lt: prevEnd }, amount: { lt: 0 } },
       _sum: { amount: true },
+      _count: { _all: true },
     }),
   ]);
 
-  const incomeRows = buildCategoryRows(incomeGroups);
-  const expenseRows = buildCategoryRows(expenseGroups);
+  // Eigenübertragungen (TRANSFER) aus den Hauptsummen herausrechnen und
+  // separat ausweisen — fuer aktuellen Monat und Vormonat gleichermassen.
+  const current = summarizeMonthlyGroups(incomeGroups, expenseGroups);
+  const previous = summarizeMonthlyGroups(prevIncomeGroups, prevExpenseGroups);
 
-  // Monatssummen aus den (wenigen) aggregierten Gruppen — inklusive der
-  // unkategorisierten Anteile, damit der Saldo den vollen Monat abbildet.
-  const incomeTotal = incomeGroups.reduce((s, g) => s + toNumber(g._sum.amount), 0);
-  const expenseTotal = expenseGroups.reduce((s, g) => s + toNumber(g._sum.amount), 0);
+  const { incomeRows, expenseRows, incomeTotal, expenseTotal, internalTransfers, monthTxnCount } =
+    current;
   const saldo = incomeTotal + expenseTotal;
 
-  const prevIncome = toNumber(prevIncomeAgg._sum.amount);
-  const prevExpense = toNumber(prevExpenseAgg._sum.amount);
+  const prevIncome = previous.incomeTotal;
+  const prevExpense = previous.expenseTotal;
   const prevSaldo = prevIncome + prevExpense;
 
   const uncatSum = toNumber(uncategorized._sum.amount);
   const uncatCount = uncategorized._count._all;
-
-  const monthTxnCount =
-    incomeGroups.reduce((s, g) => s + g._count._all, 0) +
-    expenseGroups.reduce((s, g) => s + g._count._all, 0);
 
   // Waehrung: bei Kontofilter die des Kontos, sonst EUR als Default.
   const selectedAccount = accountFilter ? accounts.find((a) => a.id === accountFilter) : undefined;
@@ -242,6 +326,7 @@ export async function buildMonthlyReport({
     expenseTotal,
     saldo,
     uncategorized: { count: uncatCount, sum: uncatSum },
+    internalTransfers,
     monthTxnCount,
     comparison,
   };

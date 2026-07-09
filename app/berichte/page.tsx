@@ -43,12 +43,14 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
     expenseTotal,
     saldo,
     uncategorized,
+    internalTransfers,
     monthTxnCount,
     comparison,
   } = report;
 
   const uncatCount = uncategorized.count;
   const uncatSum = uncategorized.sum;
+  const hasTransfers = internalTransfers.count > 0;
 
   const fmt = makeCurrencyFormatter(currency);
 
@@ -114,7 +116,7 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
         </p>
       ) : null}
 
-      {monthTxnCount === 0 && uncatCount === 0 ? (
+      {monthTxnCount === 0 && uncatCount === 0 && !hasTransfers ? (
         <p>Keine Buchungen in diesem Monat.</p>
       ) : (
         <>
@@ -129,6 +131,12 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
                   Einnahmen {fmt.format(incomeTotal)} · Ausgaben {fmt.format(expenseTotal)} ·{" "}
                   {monthTxnCount.toLocaleString("de-DE")} Buchung
                   {monthTxnCount === 1 ? "" : "en"}
+                </small>
+                <br />
+                <small>
+                  Alle Hauptzahlen sind <strong>ohne Eigenübertragungen</strong> (interne
+                  Umbuchungen zwischen eigenen Konten) gerechnet
+                  {hasTransfers ? " — siehe eigener Abschnitt unten." : "."}
                 </small>
               </p>
             </div>
@@ -204,7 +212,58 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
           </section>
 
           <section style={{ marginTop: "1.5rem" }}>
+            <h3>Eigenübertragungen / interne Umbuchungen</h3>
+            {!hasTransfers ? (
+              <p>
+                <small>Keine Eigenübertragungen in diesem Monat.</small>
+              </p>
+            ) : (
+              <>
+                <p>
+                  <small>
+                    Nicht in Einnahmen, Ausgaben und Saldo enthalten — nur Verschiebungen
+                    zwischen eigenen Konten.
+                  </small>
+                </p>
+                <ul className="transaction-list">
+                  <li className="transaction-row">
+                    <span>Eingehend</span>
+                    <span />
+                    <span className={`transaction-amount ${amountClass(internalTransfers.incomeSum)}`}>
+                      {fmt.format(internalTransfers.incomeSum)}
+                    </span>
+                  </li>
+                  <li className="transaction-row">
+                    <span>Ausgehend</span>
+                    <span />
+                    <span className={`transaction-amount ${amountClass(internalTransfers.expenseSum)}`}>
+                      {fmt.format(internalTransfers.expenseSum)}
+                    </span>
+                  </li>
+                  <li className="transaction-row">
+                    <span>
+                      <strong>Netto</strong>
+                    </span>
+                    <span>
+                      <small>
+                        {internalTransfers.count.toLocaleString("de-DE")} Buchung
+                        {internalTransfers.count === 1 ? "" : "en"}
+                      </small>
+                    </span>
+                    <span className={`transaction-amount ${amountClass(internalTransfers.netSum)}`}>
+                      {fmt.format(internalTransfers.netSum)}
+                    </span>
+                  </li>
+                </ul>
+              </>
+            )}
+          </section>
+
+          <section style={{ marginTop: "1.5rem" }}>
             <h3>Vergleich mit Vormonat</h3>
+            <p>
+              <small>Alle Werte ohne Eigenübertragungen.</small>
+            </p>
             <table style={{ borderCollapse: "collapse", width: "100%" }}>
               <thead>
                 <tr>
