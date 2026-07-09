@@ -37,9 +37,23 @@ describe("parseCsvRow", () => {
   });
 });
 
+// Neues 7-Spalten-Format: zusaetzliche "Account"-Spalte zwischen Amount und
+// Counterparty. Enthaelt eine leere Counterparty und eine Description mit
+// Kommata (Fremdwaehrungs-Info), um das CSV-Splitting zu pruefen.
+const SAMPLE_CSV_V2 = [
+  `"Date";"Interest Date";"Amount";"Account";"Counterparty";"Name";"Description"`,
+  `"2026-03-01";"2026-03-01";"108,00";"DE********************";"DE********************";"Thorsten Diederichs";"Anthropic"`,
+  `"2026-03-01";"2026-04-01";"-107,10";"DE********************";"";"CLAUDE.AI SUBSCRIPTION";"CLAUDE.AI SUBSCRIPTION SAN FRANCISCO, US"`,
+  `"2026-03-06";"2026-04-01";"-11,30";"DE********************";"";"VOICY BY PISHI LLC";"VOICY BY PISHI LLC ABU DHABI, AE 12.99 USD, 1 USD = 0.86990 EUR"`,
+].join("\n");
+
 describe("looksLikeBunqCsv", () => {
   it("erkennt den bunq-Header in der ersten Zeile", () => {
     expect(looksLikeBunqCsv(SAMPLE_CSV)).toBe(true);
+  });
+
+  it("erkennt auch das neue 7-Spalten-Format mit Account-Spalte", () => {
+    expect(looksLikeBunqCsv(SAMPLE_CSV_V2)).toBe(true);
   });
 
   it("lehnt Volksbank-Paste ab", () => {
@@ -121,5 +135,53 @@ describe("parseBunqCsv", () => {
     ].join("\n");
     const txs = parseBunqCsv(csv);
     expect(txs).toHaveLength(1);
+  });
+});
+
+describe("parseBunqCsv (neues 7-Spalten-Format mit Account)", () => {
+  it("parst alle drei Beispielbuchungen", () => {
+    const txs = parseBunqCsv(SAMPLE_CSV_V2);
+    expect(txs).toHaveLength(3);
+  });
+
+  it("uebernimmt Date als bookingDate und Name als Textbasis", () => {
+    const txs = parseBunqCsv(SAMPLE_CSV_V2);
+    const first = txs[0];
+    expect(first.bookingDateISO).toBe("2026-03-01");
+    expect(first.valueDateISO).toBe("2026-03-01");
+    expect(first.description).toBe("Thorsten Diederichs");
+    expect(first.amount).toBe(108.0);
+  });
+
+  it("parst positive und negative Betraege mit deutschem Dezimalkomma", () => {
+    const txs = parseBunqCsv(SAMPLE_CSV_V2);
+    const amounts = txs.map((t) => t.amount);
+    expect(amounts).toContain(108.0);
+    expect(amounts).toContain(-107.1);
+    expect(amounts).toContain(-11.3);
+  });
+
+  it("verarbeitet leere Counterparty ohne Fehler", () => {
+    const txs = parseBunqCsv(SAMPLE_CSV_V2);
+    const claude = txs.find((t) => t.description === "CLAUDE.AI SUBSCRIPTION");
+    expect(claude).toBeTruthy();
+    expect(claude?.amount).toBe(-107.1);
+  });
+
+  it("splittet Description mit Komma im Text nicht falsch", () => {
+    const txs = parseBunqCsv(SAMPLE_CSV_V2);
+    const voicy = txs.find((t) => t.description === "VOICY BY PISHI LLC");
+    expect(voicy).toBeTruthy();
+    // Die gesamte Description inkl. Kommata muss in genau einem Feld landen.
+    expect(voicy?.memoRaw).toBe(
+      "VOICY BY PISHI LLC ABU DHABI, AE 12.99 USD, 1 USD = 0.86990 EUR",
+    );
+    expect(voicy?.amount).toBe(-11.3);
+  });
+
+  it("setzt merchantKey aus dem Name-Feld", () => {
+    const txs = parseBunqCsv(SAMPLE_CSV_V2);
+    const anthropic = txs.find((t) => t.description === "Thorsten Diederichs");
+    expect(anthropic?.merchantKey).toBeTruthy();
   });
 });
