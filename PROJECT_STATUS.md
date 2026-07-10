@@ -283,7 +283,10 @@ Der Volksbank-Parser setzt `description` auf die Buchungsart ("Basislastschrift"
 
 ### Berichtsexport / Weitergabe der Auswertung
 
-Die neue Berichte-Seite `/berichte` soll später exportierbar werden, damit Monatsauswertungen außerhalb der App weiterverwendet werden können.
+**Status: umgesetzt (Phase B abgeschlossen).** Die Berichte-Seite `/berichte`
+ist exportierbar, damit Monatsauswertungen außerhalb der App weiterverwendet
+werden können. Details siehe Abschnitt „Berichtsexport Phase B abgeschlossen"
+unten. Der folgende Backlog-Kontext bleibt als Begründung der Formatwahl stehen.
 
 Priorität der Exportformate:
 
@@ -311,18 +314,45 @@ auseinanderlaufen. Keine neue Dependency; PDF über Browser-Druck.
    Summierung bleibt in der DB. Die Page wird darauf umgebaut (reines Refactoring).
 2. **Reine Renderer** (`lib/report-format.ts`): `renderReportHtml` (eigenständiges
    HTML mit Inline-CSS, druckfreundlich für PDF), `renderReportMarkdown`
-   (Markdown-Tabellen), `renderReportCsv` (flache Zeilen `Abschnitt;Kategorie;Anzahl;Betrag`,
-   Beträge als rohe Zahlen, UTF-8-BOM für Excel).
+   (Markdown-Tabellen), `renderReportCsv` (flache Zeilen, siehe CSV-Entscheidung unten).
 3. **Route Handler** (`app/berichte/export/route.ts`): `GET` liest `month`/`account`/`format`,
-   validiert `format ∈ {html,md,csv}`, ruft `buildMonthlyReport` + passenden Renderer,
-   liefert `Response` mit `Content-Type` und `Content-Disposition: attachment; filename="bericht-YYYY-MM.<ext>"`.
-4. **Verlinkung** auf `/berichte`: Zeile „Exportieren als HTML · Markdown · CSV“
-   mit aktuellem `month`+`account`, plus Hinweis „Für PDF: HTML öffnen und im Browser drucken“.
+   validiert `format`, ruft `buildMonthlyReport` + passenden Renderer,
+   liefert `Response` mit `Content-Type` und `Content-Disposition: attachment; filename="finanzbericht-YYYY-MM.<ext>"`.
+4. **Verlinkung** auf `/berichte`: Zeile „Export: HTML · Markdown · CSV“
+   mit aktuellem `month`+`account`.
 5. **Tests** (`lib/report-format.test.ts`): die puren Renderer gegen ein
    `MonthlyReport`-Fixture prüfen (HTML enthält Kategoriezeilen, MD-Tabellenstruktur,
-   CSV-Escaping/BOM) — ohne DB, passend zum Vitest-Setup.
+   CSV-Escaping ohne BOM) — ohne DB, passend zum Vitest-Setup.
 
-Offene Kleinentscheidung: CSV-Format — deutsches Excel (`;`-Trenner, Komma-Dezimal,
-BOM) vs. neutral (`,`-Trenner, Punkt-Dezimal). Empfehlung: deutsches Excel.
+#### Berichtsexport Phase B abgeschlossen
 
-Start beim nächsten Mal: Schritt 1 (Refactoring `buildMonthlyReport`).
+Alle fünf Schritte des Plans sind umgesetzt:
+
+- [x] **Schritt 1** — `lib/report-data.ts` liefert `buildMonthlyReport(...)` und den Typ `MonthlyReport`; die Seite `/berichte` konsumiert das (Commits #8/#9).
+- [x] **Schritt 2** — `lib/report-format.ts` mit den reinen Renderern
+  `renderReportHtml(report)`, `renderReportMarkdown(report)`, `renderReportCsv(report)`.
+  Keine DB/Prisma, nur Darstellung; Kategorielabels aus `lib/category-labels.ts`.
+  Eigenübertragungen werden separat ausgewiesen, nicht in die Hauptsummen gerechnet.
+- [x] **Schritt 3** — Route Handler `app/berichte/export/route.ts` (`GET`,
+  `dynamic = "force-dynamic"`): liest `month`/`account`/`format`, wählt den Renderer
+  und liefert einen Attachment-Download. Formate + Aliase: `html`/`htm`,
+  `markdown`/`md`, `csv`; Default `html`; ungültiges Format → 400; Fehler in
+  `buildMonthlyReport` → 500 (ohne Details/Stacktrace). Content-Types:
+  `text/html` / `text/markdown` / `text/csv`, je `charset=utf-8`. Dateiname
+  `finanzbericht-<monthKey>.<ext>`.
+- [x] **Schritt 4** — Exportlinks auf `/berichte` (schlichte Zeile „Export:
+  HTML · Markdown · CSV“, als `<a>`-Download-Links unter der Monats-/Konto-Navigation).
+  Übernehmen den gewählten Monat und — falls gesetzt — den Kontofilter;
+  Markdown nutzt `format=markdown`.
+- [x] **Schritt 5** — `lib/report-format.test.ts` mit `MonthlyReport`-Fixture.
+
+**CSV-Format (Projektentscheidung):** neutraler CSV-Standard — Komma als
+Separator, Punkt als Dezimaltrenner, **kein UTF-8-BOM**, Beträge mit zwei
+Nachkommastellen, RFC-4180-Quoting. Bewusst abweichend von der ursprünglichen
+Plan-Empfehlung „deutsches Excel (`;`-Trenner, Komma-Dezimal, BOM)“ — begründet
+mit besserer maschineller Weiterverarbeitbarkeit.
+
+Prüfstand: `npm test -- report` → 21 passed; `npx tsc --noEmit` → sauber.
+
+Offen bleibt allenfalls PDF-Export (weiterhin nur über Browser-Druck der
+HTML-Ausgabe, keine eigene Umsetzung geplant).

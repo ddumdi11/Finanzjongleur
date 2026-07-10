@@ -61,6 +61,16 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
     return `/berichte?${q.toString()}`;
   }
 
+  // Export-Links übernehmen den aktuell gewählten Monat und (falls gesetzt) den
+  // Kontofilter und zeigen auf die Attachment-Route /berichte/export.
+  function exportLinkFor(format: string): string {
+    const q = new URLSearchParams();
+    q.set("month", report.monthKey);
+    if (report.accountId) q.set("account", report.accountId);
+    q.set("format", format);
+    return `/berichte/export?${q.toString()}`;
+  }
+
   function formatDelta(value: number): string {
     const formatted = fmt.format(Math.abs(value));
     if (value > 0) return `+${formatted}`;
@@ -104,6 +114,17 @@ export default async function ReportsPage({ searchParams }: ReportsPageProps) {
         {accountName ? ` · ${accountName}` : " · Alle Konten"}
         {" · "}
         <Link href={linkFor(report.nextMonthKey)}>Folgemonat →</Link>
+      </p>
+
+      <p>
+        <small>
+          Export:{" "}
+          <a href={exportLinkFor("html")}>HTML</a>
+          {" · "}
+          <a href={exportLinkFor("markdown")}>Markdown</a>
+          {" · "}
+          <a href={exportLinkFor("csv")}>CSV</a>
+        </small>
       </p>
 
       {mixedCurrencyWarning ? (
